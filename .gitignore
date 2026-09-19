@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.log
+*.tmp
+*.new
+.DS_Store
+EX520v-root-*.tar.gz
+EX520v-root-*.tar.gz.sha256
+EX520v-root-*.zip
+EX520v-root-*.zip.sha256

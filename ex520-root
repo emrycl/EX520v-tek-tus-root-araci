@@ -1,0 +1,108 @@
+#!/bin/sh
+set -eu
+
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$HERE"
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+export PATH
+
+install_linux_requirements() {
+    [ "$(uname -s)" = Linux ] || return 1
+    if command -v sudo >/dev/null 2>&1; then
+        elevate=sudo
+    elif [ "$(id -u)" = 0 ]; then
+        elevate=
+    else
+        echo "HATA: Eksik gereksinimleri kurmak için sudo gerekli."
+        return 1
+    fi
+
+    echo "[HAZIRLIK] Eksik sistem gereksinimleri kuruluyor..."
+    if command -v apt-get >/dev/null 2>&1; then
+        $elevate apt-get update
+        $elevate apt-get install -y python3 python3-venv openssh-client chromium iptables
+    elif command -v dnf >/dev/null 2>&1; then
+        $elevate dnf install -y python3 openssh-clients chromium iptables
+    elif command -v pacman >/dev/null 2>&1; then
+        $elevate pacman -Sy --needed --noconfirm python openssh chromium iptables
+    elif command -v zypper >/dev/null 2>&1; then
+        $elevate zypper --non-interactive install python3 python3-virtualenv openssh chromium iptables
+    else
+        echo "HATA: Desteklenen paket yöneticisi bulunamadı."
+        return 1
+    fi
+}
+
+requirements_ready() {
+    command -v python3 >/dev/null 2>&1 &&
+    command -v ssh-keygen >/dev/null 2>&1 &&
+    command -v ssh >/dev/null 2>&1 &&
+    command -v iptables >/dev/null 2>&1 &&
+    { command -v sudo >/dev/null 2>&1 || [ "$(id -u)" = 0 ]; } &&
+    { command -v google-chrome >/dev/null 2>&1 ||
+      command -v google-chrome-stable >/dev/null 2>&1 ||
+      command -v chromium >/dev/null 2>&1 ||
+      command -v chromium-browser >/dev/null 2>&1 ||
+      [ -x /opt/google/chrome/chrome ]; }
+}
+
+if ! requirements_ready; then
+    install_linux_requirements || exit 1
+fi
+
+if ! requirements_ready; then
+    echo "HATA: Python 3, Chrome/Chromium veya OpenSSH hazırlanamadı."
+    exit 1
+fi
+
+if [ ! -d .venv ]; then
+    echo "[HAZIRLIK] Çalışma ortamı oluşturuluyor..."
+    if ! python3 -m venv .venv; then
+        install_linux_requirements || exit 1
+        python3 -m venv .venv
+    fi
+fi
+
+if ! .venv/bin/python -c 'import websocket' >/dev/null 2>&1; then
+    echo "[HAZIRLIK] Gerekli Python paketi kuruluyor..."
+    .venv/bin/python -m pip install \
+        --disable-pip-version-check \
+        --quiet \
+        --no-index \
+        --find-links "$HERE/vendor" \
+        -r requirements.txt
+fi
+
+case "${1-}" in
+    "")
+        ACTION=oneclick
+        ;;
+    --dry-run)
+        ACTION=dry-run
+        ;;
+    --status)
+        ACTION=status
+        ;;
+    --panel)
+        ACTION=panel
+        ;;
+    --uninstall)
+        ACTION=uninstall
+        ;;
+    *)
+        echo "Kullanım: ./ex520-root [--dry-run|--status|--panel|--uninstall]"
+        exit 2
+        ;;
+esac
+
+set +e
+.venv/bin/python ex520_oneclick.py "$ACTION"
+STATUS=$?
+set -e
+
+if [ "${EX520_NO_PAUSE-0}" != "1" ] && [ -t 0 ] && [ -t 1 ]; then
+    printf '\nBu pencereyi kapatmak için Enter tuşuna basın...'
+    read -r _
+fi
+
+exit "$STATUS"
