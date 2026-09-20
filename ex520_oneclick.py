@@ -114,7 +114,8 @@ def device_network_id() -> str:
         ))
 
     mac_pattern = re.compile(
-        r"(?i)(?<![0-9a-f])(?:[0-9a-f]{1,2}:){5}[0-9a-f]{1,2}(?![0-9a-f])"
+        r"(?i)(?<![0-9a-f])(?:[0-9a-f]{1,2}[:-]){5}[0-9a-f]{1,2}"
+        r"(?![0-9a-f])"
     )
     target_pattern = re.compile(
         rf"(?<![0-9.]){re.escape(MODEM)}(?![0-9.])"
@@ -142,9 +143,7 @@ def device_network_id() -> str:
                 match = mac_pattern.search(line)
                 if not match:
                     continue
-                normalized = "".join(
-                    part.zfill(2) for part in match.group(0).lower().split(":")
-                )
+                normalized = re.sub(r"[:-]", "", match.group(0).lower())
                 return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
         time.sleep(0.25)
@@ -367,9 +366,12 @@ def ssh_public_key() -> bytes:
     SSH_PRIVATE_KEY_FILE.chmod(0o600)
     SSH_PUBLIC_KEY_FILE.chmod(0o600)
     public_key = SSH_PUBLIC_KEY_FILE.read_bytes()
-    if not re.fullmatch(rb"ssh-rsa [A-Za-z0-9+/=]+ ex520-root\n?", public_key):
+    if not re.fullmatch(
+        rb"ssh-rsa [A-Za-z0-9+/=]+ ex520-root(?:\r?\n)?",
+        public_key,
+    ):
         raise SystemExit("Üretilen SSH açık anahtarının biçimi geçersiz.")
-    return public_key.rstrip(b"\n") + b"\n"
+    return public_key.rstrip(b"\r\n") + b"\n"
 
 
 def refresh_ssh_known_host() -> None:
@@ -570,7 +572,6 @@ echo ROLLBACK_OK
     installs = [
         (
             f"install_one {remote} {local} {mode} "
-            f"{len(assets[remote])} "
             f"{hashlib.sha256(assets[remote]).hexdigest()}"
         )
         for remote, local, mode in transfers
@@ -587,7 +588,7 @@ dst=/var/run/misc/misc_rw
 {chr(10).join(cleanup_temps)}
 
 install_one() {{
-    remote="$1"; local="$2"; mode="$3"; size_bytes="$4"; expected_sha="$5"
+    remote="$1"; local="$2"; mode="$3"; expected_sha="$4"
     current="$dst/$local"
     tmp="$current.new"
 
@@ -616,37 +617,14 @@ install_one() {{
         if [ "$current_sha" = "$expected_sha" ]; then
             /bin/chmod "$mode" "$current"
 
-            if /usr/bin/wget -O /dev/null "$base/$remote?already-present=1"; then
-                echo "SKIP_OK:$remote"
-                return 0
-            fi
-
-            echo "SKIP_NOTIFY_FAILED:$remote" >&2
-            return 1
+            echo "SKIP_OK:$remote"
+            return 0
         fi
     fi
-
-    # Dosya sistemi metadatası için pay bırak.
-    reserve_kb=128
-    required_kb=$(( (size_bytes + 1023) / 1024 + reserve_kb ))
 
     attempt=1
     while [ "$attempt" -le 3 ]; do
         /bin/rm -f "$tmp"
-
-        available_kb="$(df -k "$dst" 2>/dev/null | /usr/bin/awk 'NR == 2 {{print $4; exit}}')" || available_kb=""
-
-        case "$available_kb" in
-            ''|*[!0-9]*)
-                echo "FREE_SPACE_CHECK_FAILED:$remote" >&2
-                return 1
-                ;;
-        esac
-
-        if [ "$available_kb" -lt "$required_kb" ]; then
-            echo "INSUFFICIENT_SPACE:$remote:available_kib=$available_kb:required_kib=$required_kb" >&2
-            return 1
-        fi
 
         if /usr/bin/wget -O "$tmp" "$base/$remote"; then
             downloaded_sha="$(/usr/sbin/openssl dgst -sha256 "$tmp" 2>/dev/null | /usr/bin/awk '{{print $NF}}')" || downloaded_sha=""
@@ -709,7 +687,7 @@ def upgrade_over_existing_ssh(bundle: Bundle) -> bool:
         "ssh", "-i", str(SSH_PRIVATE_KEY_FILE), "-p", str(SSH_PORT),
         "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
         "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no",
-        "-o", "UserKnownHostsFile=/dev/null", f"root@{MODEM}",
+        "-o", f"UserKnownHostsFile={os.devnull}", f"root@{MODEM}",
     ]
 
     for name, mode in modes.items():
@@ -811,16 +789,18 @@ def serve_bundle(bind: str, bundle: Bundle):
             with lock:
                 first = name not in fetched
                 fetched.add(name)
-                missing = sorted(expected - fetched)
-                if not missing:
+                if name == "install-complete":
                     complete.set()
 
             if first:
                 print(f"[AKTARIM] {name}", flush=True)
-                if missing:
-                    print(f"[BEKLEME] {len(missing)} dosya kaldı.", flush=True)
-                else:
+                if name == "install-complete":
                     print("[AKTARIM] Bütün dosyalar modeme ulaştı.", flush=True)
+                else:
+                    print(
+                        "[BEKLEME] Kurulum tamamlanma bildirimi bekleniyor.",
+                        flush=True,
+                    )
 
         def log_message(self, *_: object) -> None:
             return
@@ -950,6 +930,21 @@ def activate_lifemote(url: str) -> bool:
         return False
     time.sleep(1)
     return trigger(url)
+
+
+def activate_lifemote_with_fresh_login(url: str) -> bool:
+    """Yazma yetkisi düşmüş panel oturumunu bir kez yenileyerek tekrar dene."""
+    if activate_lifemote(url):
+        return True
+
+    print(
+        "[GİRİŞ] Panel yazma oturumu yenileniyor.",
+        flush=True,
+    )
+    clear_panel_session()
+    if not try_default_panel_login():
+        wait_for_panel_login()
+    return activate_lifemote(url)
 
 
 def lifemote_state() -> dict[str, str] | None:
@@ -1354,7 +1349,7 @@ def ssh_ready(timeout: int = 15) -> bool:
                 "-p", str(SSH_PORT), "-o", "BatchMode=yes",
                 "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=3",
                 "-o", "StrictHostKeyChecking=no",
-                "-o", "UserKnownHostsFile=/dev/null",
+                "-o", f"UserKnownHostsFile={os.devnull}",
                 f"root@{MODEM}", "cat /proc/self/status",
             ],
             check=False,
@@ -1752,7 +1747,7 @@ def install() -> None:
 
         url = f"http://{bind}:{PORT}/{bundle.nonce}/install.sh"
         print(f"[TETİK] Lifemote aktarımı başlatılıyor: {url}", flush=True)
-        if not activate_lifemote(url):
+        if not activate_lifemote_with_fresh_login(url):
             raise SystemExit("Panel Lifemote kurulum isteğini reddetti.")
 
         transfer_started = time.monotonic()
@@ -1838,7 +1833,8 @@ def install() -> None:
                 f"Neden: {timeout_reason}",
                 f"Alınan ({len(fetched)}): "
                 f"{', '.join(fetched) if fetched else '<yok>'}",
-                f"Eksik ({len(missing)}): "
+                f"Sunucudan istenmeyen veya cihazda zaten bulunan "
+                f"({len(missing)}): "
                 f"{', '.join(missing) if missing else '<yok>'}",
             ]
 
@@ -1938,9 +1934,14 @@ def chrome_binary() -> str:
     if fallback.is_file():
         return str(fallback)
     if sys.platform == "darwin":
-        fallback = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-        if fallback.is_file():
-            return str(fallback)
+        for fallback in (
+            Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            Path("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+            Path.home() / "Applications/Chromium.app/Contents/MacOS/Chromium",
+        ):
+            if fallback.is_file():
+                return str(fallback)
     if os.name == "nt":
         for base in (os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)"),
                      os.environ.get("LOCALAPPDATA")):

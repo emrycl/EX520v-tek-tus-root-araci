@@ -1,6 +1,8 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+chcp 65001 >nul
+set "PYTHONUTF8=1"
 
 call :ensure_requirements
 if errorlevel 1 goto :failed
@@ -38,7 +40,7 @@ where winget >nul 2>nul
 if errorlevel 1 (
   where py >nul 2>nul
   if errorlevel 1 exit /b 1
-  where ssh-keygen >nul 2>nul
+  call :openssh_ready
   if errorlevel 1 exit /b 1
   call :chrome_ready
   if errorlevel 1 exit /b 1
@@ -53,7 +55,7 @@ if errorlevel 1 (
   set "PATH=%LocalAppData%\Programs\Python\Launcher;%LocalAppData%\Programs\Python\Python312;%LocalAppData%\Programs\Python\Python312\Scripts;%PATH%"
 )
 
-where ssh-keygen >nul 2>nul
+call :openssh_ready
 if errorlevel 1 (
   echo [HAZIRLIK] Windows OpenSSH Client kuruluyor...
   powershell -NoProfile -ExecutionPolicy Bypass -Command ^
@@ -70,9 +72,16 @@ if errorlevel 1 (
 )
 
 where py >nul 2>nul || exit /b 1
-where ssh-keygen >nul 2>nul || exit /b 1
+call :openssh_ready
+if errorlevel 1 exit /b 1
 call :chrome_ready
 exit /b %ERRORLEVEL%
+
+:openssh_ready
+where ssh >nul 2>nul || exit /b 1
+where ssh-keygen >nul 2>nul || exit /b 1
+where ssh-keyscan >nul 2>nul || exit /b 1
+exit /b 0
 
 :chrome_ready
 if exist "%ProgramFiles%\Google\Chrome\Application\chrome.exe" exit /b 0

@@ -37,6 +37,7 @@ requirements_ready() {
     command -v python3 >/dev/null 2>&1 &&
     command -v ssh-keygen >/dev/null 2>&1 &&
     command -v ssh >/dev/null 2>&1 &&
+    command -v ssh-keyscan >/dev/null 2>&1 &&
     command -v iptables >/dev/null 2>&1 &&
     { command -v sudo >/dev/null 2>&1 || [ "$(id -u)" = 0 ]; } &&
     { command -v google-chrome >/dev/null 2>&1 ||

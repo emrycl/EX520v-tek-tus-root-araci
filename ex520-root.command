@@ -12,11 +12,24 @@ elif [ -x /usr/local/bin/brew ]; then
     PATH="/usr/local/bin:$PATH"
 fi
 
+openssh_ready() {
+    command -v ssh-keygen >/dev/null 2>&1 &&
+    command -v ssh >/dev/null 2>&1 &&
+    command -v ssh-keyscan >/dev/null 2>&1
+}
+
+chrome_ready() {
+    [ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] ||
+    [ -x "$HOME/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] ||
+    [ -x "/Applications/Chromium.app/Contents/MacOS/Chromium" ] ||
+    [ -x "$HOME/Applications/Chromium.app/Contents/MacOS/Chromium" ] ||
+    command -v chromium >/dev/null 2>&1
+}
+
 requirements_ready() {
     command -v python3 >/dev/null 2>&1 &&
-    command -v ssh-keygen >/dev/null 2>&1 &&
-    { [ -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] ||
-      command -v chromium >/dev/null 2>&1; }
+    openssh_ready &&
+    chrome_ready
 }
 
 if ! requirements_ready; then
@@ -29,9 +42,8 @@ if ! requirements_ready; then
     fi
     echo "[HAZIRLIK] Eksik sistem gereksinimleri kuruluyor..."
     command -v python3 >/dev/null 2>&1 || brew install python
-    command -v ssh-keygen >/dev/null 2>&1 || brew install openssh
-    if [ ! -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] &&
-       ! command -v chromium >/dev/null 2>&1; then
+    openssh_ready || brew install openssh
+    if ! chrome_ready; then
         brew install --cask google-chrome
     fi
 fi
@@ -43,6 +55,10 @@ fi
 
 if [ ! -d .venv ]; then
     python3 -m venv .venv || {
+        command -v brew >/dev/null 2>&1 || {
+            echo "HATA: Python sanal ortamı oluşturulamadı ve Homebrew bulunamadı."
+            exit 1
+        }
         brew install python
         python3 -m venv .venv
     }
@@ -53,10 +69,22 @@ if ! .venv/bin/python -c 'import websocket' >/dev/null 2>&1; then
         --no-index --find-links "$HERE/vendor" -r requirements.txt
 fi
 
-action=${1:-oneclick}
-action=${action#--}
+case "${1-}" in
+    "") action=oneclick ;;
+    --dry-run) action=dry-run ;;
+    --status) action=status ;;
+    --panel) action=panel ;;
+    --uninstall) action=uninstall ;;
+    *)
+        echo "Kullanım: ./ex520-root.command [--dry-run|--status|--panel|--uninstall]"
+        exit 2
+        ;;
+esac
+
+set +e
 .venv/bin/python ex520_oneclick.py "$action"
 status=$?
+set -e
 printf '\nBu pencereyi kapatmak için Enter tuşuna basın...'
-read -r _
+read -r _ || true
 exit "$status"
