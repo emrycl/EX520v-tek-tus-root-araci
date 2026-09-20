@@ -175,3 +175,13 @@ saklanır.
 
 Araç yeni bir modem web sayfası oluşturmaz; firmware içindeki stok sayfaları ve
 stok backend nesnelerini kullanır.
+
+## Lisans
+
+Bu projenin özgün kaynak kodu GNU General Public License v3.0 veya sonraki bir
+sürüm altında lisanslanmıştır (`GPL-3.0-or-later`). Ayrıntılar için
+[LICENSE](LICENSE) dosyasına bakın. Paketle birlikte dağıtılan üçüncü taraf
+bileşenler kendi lisanslarını korur; ayrıntılar
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) dosyasındadır.
+
+Copyright (C) 2026 Emir Yücel
