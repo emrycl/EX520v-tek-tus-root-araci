@@ -28,13 +28,6 @@ install_tr069_lockdown() {
         /usr/bin/iptables -I INPUT 1 -p tcp --dport 8443 -j DROP
 }
 
-install_agent_compat() {
-    tmpd_patch=/var/run/misc/misc_rw/patch-tmpd-agent.sh
-    libcmm_patch=/var/run/misc/misc_rw/patch-libcmm-all-agent.sh
-    [ -x "$tmpd_patch" ] && /bin/sh "$tmpd_patch" >/dev/null 2>&1 || true
-    [ -x "$libcmm_patch" ] && /bin/sh "$libcmm_patch" >/dev/null 2>&1 || true
-}
-
 restore_feature_traffic() {
     # Eski paketlerden kalan genel kuralları kaldır.
     for port in 80 443 7547 8443 1883 8883 5222; do
@@ -296,6 +289,17 @@ install_stock_page_visibility() {
     }
     /bin/mv "$patched.new" "$patched"
     /bin/chmod 440 "$patched"
+
+    qs_end="$runtime/qsEnd.htm"
+    /bin/sed \
+        's/if (INCLUDE_EASYMESH && $.easymeshEnable == "1" && $.easymeshWorkmode == "UnConfAgent")/if (false \&\& INCLUDE_EASYMESH \&\& $.easymeshEnable == "1" \&\& $.easymeshWorkmode == "UnConfAgent")/' \
+        "$target/qsEnd.htm" >"$qs_end.new" || return
+    [ "$(/bin/grep -c 'if (false && INCLUDE_EASYMESH' "$qs_end.new")" = 1 ] || {
+        /bin/rm -f "$qs_end.new"
+        return
+    }
+    /bin/mv "$qs_end.new" "$qs_end"
+    /bin/chmod 440 "$qs_end"
     /bin/mount --bind "$runtime" "$target"
 }
 
@@ -453,7 +457,6 @@ LOGIN
 # Sonradan başlayan servisler değiştirirse kuralları yeniden uygula.
 while true; do
     restore_feature_traffic
-    install_agent_compat
     install_panel_root_account
     install_admin_root_role
     restore_stock_webroot
