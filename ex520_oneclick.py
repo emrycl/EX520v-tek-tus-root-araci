@@ -98,29 +98,56 @@ def device_network_id() -> str:
             raise SystemExit("EX520_DEVICE_ID biçimi geçersiz.")
         return hashlib.sha256(override.encode()).hexdigest()[:16]
 
-    try:
-        with socket.create_connection((MODEM, 80), timeout=3):
-            pass
-    except OSError:
-        pass
+    ip_tool = shutil.which("ip")
+    arp_tool = shutil.which("arp")
+    if arp_tool is None and Path("/usr/sbin/arp").is_file():
+        arp_tool = "/usr/sbin/arp"
 
-    commands = (
-        ("ip", "neigh", "show", MODEM),
-        ("arp", "-n", MODEM),
-        ("arp", "-a", MODEM),
+    commands: list[tuple[str, ...]] = []
+    if ip_tool:
+        commands.append((ip_tool, "neigh", "show", MODEM))
+    if arp_tool:
+        commands.extend((
+            (arp_tool, "-n", MODEM),
+            (arp_tool, "-an", MODEM),
+            (arp_tool, "-a"),
+        ))
+
+    mac_pattern = re.compile(
+        r"(?i)(?<![0-9a-f])(?:[0-9a-f]{1,2}:){5}[0-9a-f]{1,2}(?![0-9a-f])"
     )
-    pattern = re.compile(r"(?i)(?<![0-9a-f])(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}(?![0-9a-f])")
-    for command in commands:
+    target_pattern = re.compile(
+        rf"(?<![0-9.]){re.escape(MODEM)}(?![0-9.])"
+    )
+
+    for _ in range(3):
         try:
-            result = subprocess.run(
-                command, check=False, capture_output=True, text=True, timeout=5,
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-        match = pattern.search(result.stdout)
-        if match:
-            normalized = re.sub(r"[^0-9a-f]", "", match.group(0).lower())
-            return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+            with socket.create_connection((MODEM, 80), timeout=3):
+                pass
+        except OSError:
+            pass
+
+        for command in commands:
+            try:
+                result = subprocess.run(
+                    command, check=False, capture_output=True, text=True,
+                    timeout=5,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+
+            for line in result.stdout.splitlines():
+                if not target_pattern.search(line):
+                    continue
+                match = mac_pattern.search(line)
+                if not match:
+                    continue
+                normalized = "".join(
+                    part.zfill(2) for part in match.group(0).lower().split(":")
+                )
+                return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+        time.sleep(0.25)
 
     raise SystemExit(
         "Cihaz LAN kimliği belirlenemedi. Modeme bağlı olduğunuzu kontrol edip "

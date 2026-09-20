@@ -4,6 +4,8 @@ set -eu
 HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 cd "$HERE"
 
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
+
 if [ -x /opt/homebrew/bin/brew ]; then
     PATH="/opt/homebrew/bin:$PATH"
 elif [ -x /usr/local/bin/brew ]; then

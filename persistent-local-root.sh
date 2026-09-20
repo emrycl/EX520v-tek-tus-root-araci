@@ -252,7 +252,7 @@ install_panel_root_account() {
 }
 
 restore_stock_webroot() {
-    for page in operateMode manageCtrl easyLocalAccess smarthomeEE ddos applicationList portMirror; do
+    for page in manageCtrl easyLocalAccess smarthomeEE ddos applicationList portMirror; do
         target="/web/main/${page}.htm"
         while /bin/umount "$target" 2>/dev/null; do :; done
         /bin/busybox rm -f "/var/run/misc/misc_rw/${page}.root.htm" 2>/dev/null || true
@@ -266,6 +266,37 @@ restore_stock_webroot() {
         /var/run/misc/misc_rw/tpee-enable.sh \
         /var/run/misc/misc_rw/tpee-disable.sh \
         /var/run/misc/misc_rw/oid_str.unlocked.js 2>/dev/null || true
+}
+
+install_stock_page_visibility() {
+    target=/web/main
+    runtime=/var/tmp/ex520-web-main
+    patched="$runtime/operateMode.htm"
+
+    if /bin/grep -q " $target " /proc/mounts 2>/dev/null; then
+        return
+    fi
+
+    [ -r "$target/operateMode.htm" ] || return
+    /bin/rm -rf "$runtime"
+    /bin/mkdir -p "$runtime" || return
+    /bin/cp -a "$target/." "$runtime/" || return
+    /bin/sed \
+        -e 's@id="en_agent" class="part-separate-m nd"@id="en_agent" class="part-separate-m"@' \
+        -e \
+        "s@//\$(\"#en_agent\").removeClass('nd');@\$(\"#en_agent\").removeClass('nd');@" \
+        "$target/operateMode.htm" >"$patched.new" || return
+    [ "$(/bin/grep -c 'id="en_agent" class="part-separate-m"' "$patched.new")" = 1 ] || {
+        /bin/rm -f "$patched.new"
+        return
+    }
+    [ "$(/bin/grep -c "^[[:space:]]*\$(\"#en_agent\").removeClass('nd');" "$patched.new")" = 1 ] || {
+        /bin/rm -f "$patched.new"
+        return
+    }
+    /bin/mv "$patched.new" "$patched"
+    /bin/chmod 440 "$patched"
+    /bin/mount --bind "$runtime" "$target"
 }
 
 install_stock_menu_unlock() {
@@ -426,6 +457,7 @@ while true; do
     install_panel_root_account
     install_admin_root_role
     restore_stock_webroot
+    install_stock_page_visibility
     install_stock_menu_unlock
     install_root_api
     install_ssh
