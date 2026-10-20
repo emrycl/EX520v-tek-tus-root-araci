@@ -1,89 +1,113 @@
 # EX520v Tek Tuş Root Aracı
 
-EX520v modemlerde stok panel, SSH ve Telnet üzerinden kalıcı root erişimi
-sağlayan kurulum aracıdır.
+EX520v modemlerde kalıcı UID 0 erişimi sağlayan, kurulumu ve doğrulamayı tek
+akışta tamamlayan çok platformlu bir araçtır. Cihazı ve firmware sürümünü
+kurulumdan önce denetler; uygun profili otomatik seçer ve gerekli dosyaları
+yalnız yerel ağ üzerinden modeme aktarır.
 
-## Uyarı
+## Önemli uyarı
 
 Bu proje yalnızca sahibi olduğunuz veya yönetmek için açık izin aldığınız
-cihazlarda bilgilendirme, araştırma ve modem firmware'inde bulunan özellikleri
-kullanabilme amacıyla hazırlanmıştır. Yetkisiz erişim, hizmet engelleme, ağlara
-izinsiz müdahale veya başka yasa dışı işlemler için kullanılmamalıdır. Aracı
-kullanan kişi cihaz, ağ ve yürürlükteki mevzuat bakımından tüm sorumluluğu kabul
-eder.
+cihazlarda kullanılmalıdır. Yetkisiz erişim, hizmet engelleme, ağlara izinsiz
+müdahale veya diğer yasa dışı işlemler kullanıcının sorumluluğundadır.
 
-Firmware üzerinde değişiklik yapmak cihazın garanti veya destek koşullarını
+Firmware üzerinde değişiklik yapmak garanti ve destek koşullarını
 etkileyebilir. Başlamadan önce modem ayarlarınızı yedekleyin.
 
-## Desteklenen cihaz
+## Özellikler
 
-- Model: `EX520v`
-- Donanım: tüm EX520v revizyonları
-- Firmware: `EX520v_260514`
+- TCP/2222 üzerinden anahtar tabanlı UID 0 SSH
+- TCP/2323 üzerinden parolalı UID 0 Telnet
+- Token korumalı yerel root API
+- Modem yeniden başlatıldığında otomatik çalışan kalıcı kurulum
+- Root servislerini yerel ağla sınırlayan güvenlik duvarı kuralları
+- TR-069 yönetim portu için erişim kilidi
+- Her modem için ayrı parola, API tokenı, SSH anahtarı ve `known_hosts` kaydı
+- Kurulum öncesi model, firmware ve dosya bütünlüğü doğrulaması
+- Doğrulanmış yedek üzerinden güvenli kaldırma
 
-Araç kuruluma başlamadan önce model ve firmware sürümünü doğrular. Uyuşmazlık
-varsa modeme dosya göndermez.
+Tam firmware profilinde ayrıca stok web paneli için gerçek `root` hesabı,
+backend erişimi, Port Mirror, Paket Yakalama, CWMP ve Sistem Araçları sayfaları
+açılır. Araç yeni bir web arayüzü kurmaz; firmware içinde bulunan stok sayfaları
+ve backend nesnelerini kullanır.
 
-## İndirme
+## Desteklenen cihaz ve firmware sürümleri
 
-Dağıtım dosyaları bu klasörde yer alır. Proje herhangi bir uzak depoya
-otomatik dosya göndermez.
+| Model | Firmware | Profil | Sağlanan erişim |
+| --- | --- | --- | --- |
+| EX520v | `EX520v_260514` | Tam | SSH, Telnet, root API, root web paneli ve stok tanılama sayfaları |
+| EX520v | `EX520v-v1.0_250522` | Çekirdek root | SSH, Telnet ve root API |
+| EX520v | `EX520v-v1.0_250120` | Çekirdek root | SSH, Telnet ve root API |
 
-### Linux — test edildi
+Tüm EX520v donanım revizyonları kabul edilir. Araç model ve firmware sürümünü
+kurulum başlamadan doğrular; desteklenmeyen bir cihazda modeme dosya göndermez.
 
-- `EX520v-root-linux.tar.gz`
-- `EX520v-root-linux.tar.gz.sha256`
+Eski firmware sürümlerinde sürüme bağımlı web paneli bellek yamaları güvenlik
+amacıyla uygulanmaz. Stok yönetici hesabı korunur; kalıcı UID 0 SSH, Telnet,
+root API ve TR-069 kilidi kurulmaya devam eder.
 
-### macOS — test edilmedi
+## Platform durumu
 
-- `EX520v-root-macos.tar.gz`
-- `EX520v-root-macos.tar.gz.sha256`
+| Platform | Durum |
+| --- | --- |
+| Linux | Fiziksel modem üzerinde test edildi |
+| Windows 10 | Desteklenen üç firmware sürümüyle fiziksel modem üzerinde test edildi |
+| macOS | Başlatıcı hazır; fiziksel cihazda uçtan uca test edilmedi |
 
-### Windows — test edilmedi
-
-- `EX520v-root-windows.zip`
-- `EX520v-root-windows.zip.sha256`
-
-Araç fiziksel modem üzerinde yalnız Linux ortamında denenmiştir. macOS ve
-Windows başlatıcıları hazırlanmış ve statik olarak kontrol edilmiş, ancak bu
-platformlarda gerçek cihaz kurulumu yapılmamıştır.
+Windows başlatıcısının eksik bağımlılıkları temiz bir sisteme otomatik kurma
+akışı henüz uçtan uca test edilmemiştir.
 
 ## Gereksinimler
 
-- Modem paneline yerel ağ erişimi
+- Modemin yerel ağına Ethernet veya Wi-Fi bağlantısı
+- `http://192.168.1.1/` adresindeki modem paneline erişim
+- Eksik sistem bileşenlerinin ilk kurulumu için internet bağlantısı
 
-Başlatıcı eksik Python, Chrome/Chromium, OpenSSH ve Linux firewall
-araçlarını denetler. Desteklenen sistemlerde eksikleri şu kaynaklarla kurar:
+Başlatıcı Python, Chrome/Chromium ve OpenSSH gereksinimlerini denetler. Linux'ta
+ayrıca geçici aktarım izni için `iptables` gerekir. Eksikler desteklenen
+sistemlerde şu kaynaklardan kurulur:
 
-- Linux: `apt`, `dnf`, `pacman` veya `zypper` ve `sudo`;
-- macOS: Homebrew;
-- Windows: `winget` ve Windows OpenSSH Capability.
+- Linux: `apt`, `dnf`, `pacman` veya `zypper`
+- macOS: Homebrew
+- Windows: `winget` ve Windows OpenSSH Client
 
-Linux ve Windows kurulum sırasında yönetici parolası/onayı isteyebilir. macOS'ta
-Homebrew sistemde yoksa güvenlik nedeniyle uzaktan bir betik otomatik
-çalıştırılmaz; Homebrew bir kez `https://brew.sh` adresinden kurulmalıdır.
+Linux ve Windows hazırlık aşamasında yönetici parolası veya UAC onayı
+isteyebilir. macOS'ta Homebrew yoksa önce [brew.sh](https://brew.sh/) üzerinden
+kurulmalıdır.
 
-Python `websocket-client` bağımlılığı paket içinde bulunur ve internet
-bağlantısı gerektirmeden kurulur. Eksik sistem uygulamalarının ilk kurulumu
-ise işletim sisteminin paket kaynağına erişim gerektirir.
+`websocket-client` bağımlılığı dağıtım paketinde bulunur ve çevrim dışı kurulur.
 
-Güvenlik duvarı modemden gelen kurulumu engelliyorsa araç aktarım için geçici
-bir izin ekler. Linux'ta izin modem IP'si ve TCP/18084 ile sınırlıdır; macOS'ta
-paketteki Python yorumlayıcısına geçici uygulama izni verilir; Windows'ta
-TCP/18084 yalnızca modem IP'sine açılır. Sistem yönetici parolası veya UAC
-onayı isteyebilir. İzin işlem bitince otomatik kaldırılır; parola kaydedilmez.
+## İndirme dosyaları
 
-## Bağlantı
+Kullandığınız işletim sistemine ait paketi indirin:
 
-Modemi Ethernet kablosuyla doğrudan bilgisayara veya aynı yerel ağdaki bir
-cihaza bağlayabilirsiniz. `http://192.168.1.1/` adresinin açılması yeterlidir.
-Farklı bir panel adresi kullanılıyorsa `EX520_HOST` değişkeniyle belirtilebilir.
+- Linux: `EX520v-root-linux.tar.gz`
+- macOS: `EX520v-root-macos.tar.gz`
+- Windows: `EX520v-root-windows.zip`
 
-Aynı paket birden fazla modemde kullanılabilir. Araç aynı IP adresini kullanan
-cihazları LAN kimliğinden ayırır; parola, SSH anahtarı, API tokenı ve kaldırma
-yedeğini her modem için ayrı yönetir.
+Her paketin yanında bütünlük kontrolü için aynı adlı `.sha256` dosyası bulunur.
+Proje herhangi bir uzak sunucuya otomatik olarak dosya veya kimlik bilgisi
+göndermez.
 
 ## Kurulum
+
+Kurulum sırasında modemin açık kalmasını ve bilgisayarın modem ağıyla
+bağlantısının kesilmemesini sağlayın. Mümkünse bilgisayarı modeme doğrudan
+Ethernet kablosuyla bağlayın.
+
+### Windows
+
+1. `EX520v-root-windows.zip` dosyasını normal bir klasöre çıkartın.
+2. `ex520-root.bat` dosyasına çift tıklayın.
+3. UAC penceresi açılırsa gerekli izni verin.
+4. Araç modem panelini açtığında yönetici bilgilerinizle giriş yapın.
+5. Terminalde `TAMAMLANDI` mesajı görünene kadar pencereyi kapatmayın.
+
+Arşivin SHA-256 değerini PowerShell ile kontrol etmek için:
+
+```powershell
+Get-FileHash .\EX520v-root-windows.zip -Algorithm SHA256
+```
 
 ### Linux
 
@@ -104,84 +128,127 @@ cd EX520v-root
 ./ex520-root.command
 ```
 
-Finder engellerse `ex520-root.command` dosyasına sağ tıklayıp **Aç** seçeneğini
-kullanın.
+macOS uygulamayı engellerse Finder'da `ex520-root.command` dosyasına sağ
+tıklayıp **Aç** seçeneğini kullanın.
 
-### Windows
+## Panel girişi ve kurulum akışı
 
-ZIP dosyasını çıkartın ve `ex520-root.bat` dosyasına çift tıklayın. SHA-256
-değerini PowerShell ile kontrol edebilirsiniz:
+Araç stok `admin/admin` bilgilerini yalnızca bir kez dener. Bu bilgiler geçerli
+değilse açılan modem paneline mevcut kullanıcı adınız ve parolanızla giriş
+yapın. Başarılı giriş algılandığında işlem otomatik devam eder. Panel parolası
+kaydedilmez.
 
-```powershell
-Get-FileHash .\EX520v-root-windows.zip -Algorithm SHA256
+Kurulum sırasında araç:
+
+1. Modeli ve firmware sürümünü doğrular.
+2. Cihaza uygun tam veya çekirdek root profilini seçer.
+3. Özgün Lifemote durumunu kaldırma işlemi için yedekler.
+4. Dosyaları yerel TCP/18084 aktarım sunucusundan modeme gönderir.
+5. Kalıcılık kancasını ve root servislerini kurar.
+6. SSH, Telnet, API, güvenlik duvarı ve profile ait web özelliklerini doğrular.
+7. Bağlantı bilgilerini terminalde gösterir.
+
+Bilgiler her modem için ayrı olarak aşağıdaki dizinde tutulur:
+
+```text
+~/.local/state/ex520-root/devices/<cihaz-kimliği>/
 ```
 
-## Panel girişi
+## Komutlar
 
-Araç stok `admin/admin` bilgilerini yalnızca bir kez dener. Bilgiler geçerli
-değilse açılan stok modem paneline kendi kullanıcı adınız ve şifrenizle giriş
-yapın. Başarılı giriş algılandığında kurulum kendiliğinden devam eder. Stok
-panel parolası kaydedilmez.
-
-Kurulum sonunda terminalde şunlar gösterilir:
-
-- stok panel için `root` hesabı ve parolası;
-- UID 0 SSH komutu ve özel anahtar yolu;
-- UID 0 Telnet bilgileri;
-- Port Mirror, Paket Yakalama ve CWMP stok sayfa adresleri.
-
-Araç ancak UID 0 Telnet/SSH, root API, kalıcılık, gerçek panel Root
-backend'i, Port Mirror, Paket Yakalama, CWMP ve Sistem Araçları altındaki 16
-stok sayfanın tamamı doğrulandığında kurulumu başarılı sayar. Firmware etiketi
-aynı olsa bile gerekli binary imzaları uyuşmazsa başarılı sonucu vermez.
-
-## Diğer komutlar
+Linux örneği:
 
 ```sh
+./ex520-root --dry-run
 ./ex520-root --status
 ./ex520-root --panel
 ./ex520-root --uninstall
 ```
 
-Farklı modem adresi:
+Windows örneği:
+
+```powershell
+.\ex520-root.bat --dry-run
+.\ex520-root.bat --status
+.\ex520-root.bat --panel
+.\ex520-root.bat --uninstall
+```
+
+| Komut | Açıklama |
+| --- | --- |
+| `--dry-run` | Modemde değişiklik yapmadan bağlantı, model ve firmware kontrollerini çalıştırır |
+| `--status` | Portları ve kurulu root bileşenlerini denetler |
+| `--panel` | Araç tarafından yönetilen modem panelini açar |
+| `--uninstall` | Doğrulanmış Lifemote yedeğini geri yükler ve root bileşenlerini kaldırır |
+
+Modem farklı bir IP adresindeyse çalıştırmadan önce `EX520_HOST` değişkenini
+ayarlayın:
 
 ```sh
 EX520_HOST=192.168.1.1 ./ex520-root
 ```
 
+```powershell
+$env:EX520_HOST = "192.168.1.1"
+.\ex520-root.bat
+```
+
+## Sorun giderme
+
+### `YENİDEN TETİK` mesajı tekrarlanıyor
+
+`[YENİDEN TETİK]` mesajı, modemin kurulum dosyalarından birini bilgisayardan
+alamadığını ve aracın aktarımı tekrar denediğini gösterir. Windows'ta mesaj
+tekrarlanıyor ve aktarım ilerlemiyorsa:
+
+1. Aracı kapatın.
+2. **Windows Güvenliği > Güvenlik duvarı ve ağ koruması** bölümünü açın.
+3. Etkin ağ profilini seçin ve **Microsoft Defender Güvenlik Duvarı** seçeneğini
+   geçici olarak kapatın.
+4. `ex520-root.bat` dosyasını yeniden çalıştırın.
+5. Kurulum tamamlanır tamamlanmaz Windows Güvenlik Duvarı'nı yeniden açın.
+
+Bu işlem sırasında yalnızca güvendiğiniz modem ağına bağlı kalın. Araç normalde
+modem IP'si için TCP/18084 üzerinde geçici bir izin oluşturur ve işlem sonunda
+bu izni otomatik kaldırır; bazı Windows yapılandırmalarında genel güvenlik duvarı
+ilk aktarımı yine de engelleyebilir.
+
+### Modem paneli açılmıyor
+
+- Bilgisayarın modem ağına bağlı olduğunu doğrulayın.
+- Tarayıcıdan `http://192.168.1.1/` adresini açmayı deneyin.
+- VPN, proxy veya farklı ağ bağlantılarını geçici olarak kapatın.
+- Modem farklı bir adres kullanıyorsa `EX520_HOST` değişkenini ayarlayın.
+
+### Kurulum yarıda kaldı
+
+Aracı yeniden çalıştırın. Araç mevcut kurulumu denetler, sağlıklı bileşenleri
+korur ve eksik dosyaları tamamlamaya çalışır. Aynı IP adresini kullanan farklı
+modemler LAN kimliğine göre ayrılır.
+
+### SSH anahtarı değişti uyarısı
+
+SSH sunucu anahtarı her modem için ayrı `known_hosts` dosyasında tutulur. Modem
+fabrika ayarlarına döndürüldüyse veya aynı cihaz kimliğiyle farklı bir modem
+kullanılıyorsa ilgili cihaz durumunu doğrulamadan eski anahtar kaydını silmeyin.
+
 ## Güvenlik
 
 - Root parolası, API tokenı ve SSH anahtarı ilk kurulumda rastgele üretilir.
-- Bilgiler dağıtım paketinde bulunmaz.
-- SSH yalnız kurulumda üretilen anahtarı kabul eder.
-- SSH sunucu anahtarı her modem için ayrı `known_hosts` dosyasında tutulur;
-  fabrika sıfırlanan başka bir cihaz aynı IP'yi kullansa bile sistem geneli
-  `~/.ssh/known_hosts` kaydıyla çakışmaz.
-- Root servisleri yerel ağ firewall kurallarıyla sınırlandırılır.
-- Her modem için ayrı kimlik bilgileri tutulur.
-- Kaldırma işlemi özgün Lifemote durumunu doğrulamadan değişiklik yapmaz.
-
-Yerel kimlik bilgileri `~/.local/state/ex520-root` altında `0600` izinleriyle
-saklanır.
-
-## Açılan erişimler
-
-- stok panelde gerçek root hesabı ve backend erişimi;
-- TCP/2222 üzerinde anahtar tabanlı UID 0 SSH;
-- TCP/2323 üzerinde parolalı UID 0 Telnet;
-- token korumalı yerel root API;
-- stok Port Mirror, Paket Yakalama ve CWMP sayfaları;
-- yeniden başlatma sonrasında kalıcı kurulum.
-
-Araç yeni bir modem web sayfası oluşturmaz; firmware içindeki stok sayfaları ve
-stok backend nesnelerini kullanır.
+- SSH yalnızca araca ait özel anahtarla kimlik doğrular; parola girişi kapalıdır.
+- SSH sunucu anahtarı ilk bağlantıda cihazın özel `known_hosts` dosyasına
+  kaydedilir; sonraki anahtar değişiklikleri sessizce kabul edilmez.
+- Root servisleri yerel ağ arayüzüyle sınırlandırılır ve WAN erişimi engellenir.
+- Stok panel parolası okunmaz veya kaydedilmez.
+- Yerel kimlik bilgileri kullanıcıya özel dosya izinleriyle saklanır.
+- Kaldırma işlemi özgün Lifemote yedeğini doğrulamadan modem durumunu değiştirmez.
 
 ## Lisans
 
-Bu projenin özgün kaynak kodu GNU General Public License v3.0 veya sonraki bir
+Projenin özgün kaynak kodu GNU General Public License v3.0 veya sonraki bir
 sürüm altında lisanslanmıştır (`GPL-3.0-or-later`). Ayrıntılar için
-[LICENSE](LICENSE) dosyasına bakın. Paketle birlikte dağıtılan üçüncü taraf
-bileşenler kendi lisanslarını korur; ayrıntılar
-[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) dosyasındadır.
+[LICENSE](LICENSE) dosyasına bakın. Paketle dağıtılan üçüncü taraf bileşenler
+kendi lisanslarını korur; ayrıntılar [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES)
+dosyasındadır.
 
 Copyright (C) 2026 Emir Yücel

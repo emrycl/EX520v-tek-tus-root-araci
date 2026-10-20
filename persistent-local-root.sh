@@ -5,13 +5,15 @@ login_script=/var/tmp/persistent-root-login.sh
 pid_file=/var/run/persistent-local-root.pid
 patched_httpd_pid=
 panel_root_password='__PANEL_ROOT_PASSWORD__'
+enable_panel_root='__ENABLE_PANEL_ROOT__'
 
 # LXC açılış kancasını bekletme.
 if [ "${1:-}" != "--daemon" ]; then
     if [ -s "$pid_file" ] && /bin/kill -0 "$(/bin/cat "$pid_file")" 2>/dev/null; then
         exit 0
     fi
-    /bin/sh "$0" --daemon >/var/tmp/persistent-local-root.log 2>&1 &
+    /bin/sh "$0" --daemon </dev/null \
+        >/var/tmp/persistent-local-root.log 2>&1 &
     exit 0
 fi
 
@@ -456,6 +458,18 @@ LOGIN
 
 # Sonradan başlayan servisler değiştirirse kuralları yeniden uygula.
 while true; do
+    if [ "$enable_panel_root" != '1' ]; then
+        # Eski firmware profilinde önce sürümden bağımsız erişim kanallarını aç.
+        # Böylece stok web bileşenlerindeki farklar çekirdek root'u engellemez.
+        install_service
+        install_ssh
+        install_root_api
+        install_tr069_lockdown
+        install_wan_management_lockdown
+        sleep 15
+        continue
+    fi
+
     restore_feature_traffic
     install_panel_root_account
     install_admin_root_role
