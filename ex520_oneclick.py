@@ -45,7 +45,7 @@ BUNDLE_TOTAL_TIMEOUT = 1800
 BUNDLE_RETRY_INTERVAL = 20
 BUNDLE_MAX_TRIGGER_ATTEMPTS = 12
 FIREWALL_PROBE_TIMEOUT = 8
-VERSION = "root-agent"
+VERSION = "root-agent-legacy-1"
 VISIBLE_CDP_PORT = 9344
 VISIBLE_PROFILE = Path.home() / ".local" / "share" / "ex520-root" / "browser-profile"
 PERSISTENT_HOOK_URL = "file:///var/run/misc/misc_rw/persistent-local-root.sh"
@@ -53,7 +53,11 @@ LIFEMOTE_BACKUP_NAME = "lifemote.before.json"
 LOCAL_LIFEMOTE_BACKUP_FILE = STATE_DIR / LIFEMOTE_BACKUP_NAME
 
 SUPPORTED_MODEL = "EX520v"
-SUPPORTED_FIRMWARE = "EX520v_260514"
+SUPPORTED_FIRMWARE_PROFILES = {
+    "EX520v_260514": "full",
+    "EX520v-v1.0_250522": "legacy-core",
+    "EX520v-v1.0_250120": "legacy-core",
+}
 LEGACY_WEB_TARGETS = (
     "/web/main/operateMode.htm",
     "/web/main/manageCtrl.htm",
@@ -427,7 +431,10 @@ def disable_legacy_watcher() -> None:
 def build_bundle(
     bind: str,
     lifemote_backup: bytes | None = None,
+    profile: str = "full",
 ) -> Bundle:
+    if profile not in {"full", "legacy-core"}:
+        raise ValueError(f"Bilinmeyen firmware profili: {profile}")
     password = shell_password()
     token = api_token()
     nonce = secrets.token_urlsafe(24)
@@ -442,22 +449,30 @@ def build_bundle(
     except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
         raise SystemExit("Üretilen Lifemote yedeği geçersiz.")
 
-    hook = required(HOOK_TEMPLATE).decode()
-    if hook.count("__ROOT_PASSWORD__") != 1 or hook.count("__PANEL_ROOT_PASSWORD__") != 1:
+    hook = required(HOOK_TEMPLATE).decode().replace("\r\n", "\n")
+    if "\r" in hook:
+        raise SystemExit("Root kancası desteklenmeyen satır sonu içeriyor.")
+    if (
+        hook.count("__ROOT_PASSWORD__") != 1
+        or hook.count("__PANEL_ROOT_PASSWORD__") != 1
+        or hook.count("__ENABLE_PANEL_ROOT__") != 1
+    ):
         raise SystemExit("Root parola yer tutucusunun sayısı geçersiz.")
     hook = hook.replace("__ROOT_PASSWORD__", password)
     hook = hook.replace("__PANEL_ROOT_PASSWORD__", password[:32])
+    hook = hook.replace("__ENABLE_PANEL_ROOT__", "1" if profile == "full" else "0")
     assets = {
         "persistent-local-root.sh": hook.encode(),
         "ex520-root-api": required(ROOT / "tools/ex520-root-api"),
         "ex520-dropbear": required(ROOT / "tools/ex520-dropbear"),
-        "ex520-web-root-init": required(ROOT / "tools/ex520-web-root-init"),
         "root-authorized-keys": ssh_public_key(),
         "root-api.token": (token + "\n").encode(),
         "release.version": (VERSION + "\n").encode(),
         LIFEMOTE_BACKUP_NAME: lifemote_backup,
         "install-complete": b"OK\n",
     }
+    if profile == "full":
+        assets["ex520-web-root-init"] = required(ROOT / "tools/ex520-web-root-init")
     unmounts = "\n".join(
         f"while /bin/umount {target} 2>/dev/null; do :; done"
         for target in LEGACY_WEB_TARGETS
@@ -555,7 +570,6 @@ echo ROLLBACK_OK
     transfers = [
         ("persistent-local-root.sh", "persistent-local-root.sh", "700"),
         ("ex520-root-api", "ex520-root-api", "700"),
-        ("ex520-web-root-init", "ex520-web-root-init", "700"),
         ("ex520-dropbear", "ex520-dropbear", "700"),
         ("root-authorized-keys", "root-authorized-keys", "600"),
         ("root-api.token", "root-api.token", "600"),
@@ -563,6 +577,8 @@ echo ROLLBACK_OK
         (LIFEMOTE_BACKUP_NAME, LIFEMOTE_BACKUP_NAME, "600"),
         ("rollback.sh", "rollback.sh", "700"),
     ]
+    if profile == "full":
+        transfers.append(("ex520-web-root-init", "ex520-web-root-init", "700"))
     # misc_rw sınırlı olduğu için büyük dosyaları önce aktar.
     transfers.sort(
         key=lambda item: len(assets[item[0]]),
@@ -572,7 +588,8 @@ echo ROLLBACK_OK
     installs = [
         (
             f"install_one {remote} {local} {mode} "
-            f"{hashlib.sha256(assets[remote]).hexdigest()}"
+            f"{hashlib.sha256(assets[remote]).hexdigest()}; "
+            f"report installed-{remote}"
         )
         for remote, local, mode in transfers
     ]
@@ -646,19 +663,29 @@ install_one() {{
     echo "FETCH_FAILED:$remote" >&2
     return 1
 }}
+report() {{
+    /usr/bin/wget -O /dev/null "$base/progress-$1" >/dev/null 2>&1 || true
+}}
+report installer-started
 {chr(10).join(installs)}
+report assets-installed
 {chr(10).join(unmounts)}
+report legacy-unmounted
 {chr(10).join(legacy_cleanup)}
+report legacy-cleaned
 cfg=/var/tmp/container/app_Wifispot/Wifispot/config
 hook="$dst/persistent-local-root.sh"
 if [ -f "$cfg" ] && ! /bin/grep -q 'persistent-local-root.sh' "$cfg"; then
     /bin/cp -p "$cfg" "$cfg.pre-root-hook"
     echo 'lxc.hook.pre-start = /var/run/misc/misc_rw/persistent-local-root.sh' >> "$cfg"
 fi
+report persistence-configured
 /usr/bin/killall ex520-root-api >/dev/null 2>&1 || true
 /bin/kill "$(/bin/cat /var/run/persistent-local-root.pid 2>/dev/null)" >/dev/null 2>&1 || true
 /bin/rm -f /var/run/persistent-local-root.pid
+report hook-starting
 /bin/sh "$hook"
+report hook-started
 
 # Kurulumun tamamlandığını istemciye bildir.
 /usr/bin/wget -O /dev/null "$base/install-complete"
@@ -676,18 +703,19 @@ def upgrade_over_existing_ssh(bundle: Bundle) -> bool:
         "persistent-local-root.sh": "700",
         "ex520-root-api": "700",
         "ex520-dropbear": "700",
-        "ex520-web-root-init": "700",
         "root-authorized-keys": "600",
         "root-api.token": "600",
         "release.version": "600",
         LIFEMOTE_BACKUP_NAME: "600",
         "rollback.sh": "700",
     }
+    if "ex520-web-root-init" in bundle.assets:
+        modes["ex520-web-root-init"] = "700"
     ssh_base = [
         "ssh", "-i", str(SSH_PRIVATE_KEY_FILE), "-p", str(SSH_PORT),
         "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes",
-        "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no",
-        "-o", f"UserKnownHostsFile={os.devnull}", f"root@{MODEM}",
+        "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
+        "-o", f"UserKnownHostsFile={SSH_KNOWN_HOSTS_FILE}", f"root@{MODEM}",
     ]
 
     for name, mode in modes.items():
@@ -772,6 +800,15 @@ def serve_bundle(bind: str, bundle: Bundle):
             request = urlsplit(self.path)
             prefix = f"/{bundle.nonce}/"
             name = request.path[len(prefix):] if request.path.startswith(prefix) else ""
+            if name.startswith("progress-") and "/" not in name:
+                body = b"OK\n"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                print(f"[TANI] {name.removeprefix('progress-')}", flush=True)
+                return
             body = bundle.assets.get(name)
             if body is None or "/" in name:
                 print(f"[HTTP] 404 {self.client_address[0]} GET {self.path}", flush=True)
@@ -1155,27 +1192,36 @@ def enforce_supported_device() -> dict[str, str]:
         flush=True,
     )
 
-    expected = {
-        "model": SUPPORTED_MODEL,
-        "softwareVersion": SUPPORTED_FIRMWARE,
-    }
-
-    mismatches = [
-        f"{key}: bulunan {fp[key]!r}, beklenen {value!r}"
-        for key, value in expected.items()
-        if fp[key] != value
-    ]
+    mismatches = []
+    if fp["model"] != SUPPORTED_MODEL:
+        mismatches.append(
+            f"model: bulunan {fp['model']!r}, beklenen {SUPPORTED_MODEL!r}"
+        )
+    if fp["softwareVersion"] not in SUPPORTED_FIRMWARE_PROFILES:
+        supported = ", ".join(repr(item) for item in SUPPORTED_FIRMWARE_PROFILES)
+        mismatches.append(
+            f"softwareVersion: bulunan {fp['softwareVersion']!r}, "
+            f"desteklenenler {supported}"
+        )
 
     if mismatches:
         raise SystemExit(
             "DESTEKLENMEYEN_CİHAZ: " + "; ".join(mismatches)
         )
 
-    print(
-        "[KONTROL] EX520v modeli ve desteklenen firmware doğrulandı; "
-        "donanım revizyonu kısıtlanmıyor.",
-        flush=True,
-    )
+    profile = SUPPORTED_FIRMWARE_PROFILES[fp["softwareVersion"]]
+    if profile == "legacy-core":
+        print(
+            "[KONTROL] Eski firmware için güvenli çekirdek root profili seçildi; "
+            "firmware'e özel web-panel bellek yamaları uygulanmayacak.",
+            flush=True,
+        )
+    else:
+        print(
+            "[KONTROL] EX520v modeli ve tam firmware profili doğrulandı; "
+            "donanım revizyonu kısıtlanmıyor.",
+            flush=True,
+        )
     return fp
 
 def root_ready(secret: str, timeout: int = 30) -> bool:
@@ -1348,8 +1394,8 @@ def ssh_ready(timeout: int = 15) -> bool:
                 "ssh", "-i", str(SSH_PRIVATE_KEY_FILE),
                 "-p", str(SSH_PORT), "-o", "BatchMode=yes",
                 "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=3",
-                "-o", "StrictHostKeyChecking=no",
-                "-o", f"UserKnownHostsFile={os.devnull}",
+                "-o", "StrictHostKeyChecking=accept-new",
+                "-o", f"UserKnownHostsFile={SSH_KNOWN_HOSTS_FILE}",
                 f"root@{MODEM}", "cat /proc/self/status",
             ],
             check=False,
@@ -1461,16 +1507,20 @@ def web_hidden_menu_ready() -> bool:
     ) is True
 
 
-def print_access_details(bundle: Bundle) -> None:
+def print_access_details(bundle: Bundle, profile: str) -> None:
     refresh_ssh_known_host()
     print("", flush=True)
     print("ROOT ERİŞİM BİLGİLERİ", flush=True)
     print(f"  Modem:          {MODEM}", flush=True)
     print("  Kullanıcı adı:  root", flush=True)
-    print(f"  Web panel:      root / {bundle.shell_password[:32]}", flush=True)
-    print(f"  Port Mirror:    http://{MODEM}/main/portMirror.htm", flush=True)
-    print(f"  Paket yakalama: http://{MODEM}/main/packetCapture.htm", flush=True)
-    print(f"  CWMP:           http://{MODEM}/main/cwmp.htm", flush=True)
+    if profile == "full":
+        print(f"  Web panel:      root / {bundle.shell_password[:32]}", flush=True)
+        print(f"  Port Mirror:    http://{MODEM}/main/portMirror.htm", flush=True)
+        print(f"  Paket yakalama: http://{MODEM}/main/packetCapture.htm", flush=True)
+        print(f"  CWMP:           http://{MODEM}/main/cwmp.htm", flush=True)
+    else:
+        print("  Profil:         eski firmware / çekirdek root", flush=True)
+        print("  Web panel:      stok yönetici hesabı korunur", flush=True)
     print(
         f"  SSH:            ssh -i {SSH_PRIVATE_KEY_FILE} "
         f"-o UserKnownHostsFile={SSH_KNOWN_HOSTS_FILE} "
@@ -1481,7 +1531,10 @@ def print_access_details(bundle: Bundle) -> None:
     print(f"  Telnet:         telnet {MODEM} 2323", flush=True)
     print("  Telnet kullanıcı: root", flush=True)
     print(f"  Telnet parola:  {bundle.shell_password}", flush=True)
-    print("  Web oturumu:     Gerçek root hesabı, rol 1 ve backend erişimi", flush=True)
+    if profile == "full":
+        print("  Web oturumu:     Gerçek root hesabı, rol 1 ve backend erişimi", flush=True)
+    else:
+        print("  Web yamaları:    uygulanmadı (sürüm uyumsuzluğu koruması)", flush=True)
     print(f"  Özel dosyalar:  {STATE_DIR}", flush=True)
 
 
@@ -1585,7 +1638,8 @@ def existing_install_ready(bundle, attempts: int = 5, delay: float = 1.0) -> boo
 
 
 def install() -> None:
-    enforce_supported_device()
+    fingerprint = enforce_supported_device()
+    profile = SUPPORTED_FIRMWARE_PROFILES[fingerprint["softwareVersion"]]
     configure_device_state()
 
     pre_lifemote = lifemote_state()
@@ -1640,12 +1694,23 @@ def install() -> None:
     bundle = build_bundle(
         bind,
         lifemote_backup=lifemote_backup,
+        profile=profile,
     )
     print(f"[BİLGİ] EX520 tek tuş root {VERSION}", flush=True)
     print(f"[AĞ] modem={MODEM} aktarım_adresi={bind}:{PORT}", flush=True)
 
     # Açılış sonrasında servislerin hazır olması birkaç saniye sürebilir.
-    if existing_install_ready(bundle):
+    readiness_attempts = 2 if profile == "legacy-core" else 5
+    if existing_install_ready(bundle, attempts=readiness_attempts):
+        if profile == "legacy-core":
+            print(
+                "[DURUM] Eski firmware çekirdek root kurulumu zaten sağlıklı; "
+                "modem üzerinde değişiklik yapılmadı.",
+                flush=True,
+            )
+            disable_legacy_watcher()
+            print_access_details(bundle, profile)
+            return
         pre_web = False
 
         try:
@@ -1686,7 +1751,7 @@ def install() -> None:
                 flush=True,
             )
             disable_legacy_watcher()
-            print_access_details(bundle)
+            print_access_details(bundle, profile)
             return
 
         try:
@@ -1696,7 +1761,7 @@ def install() -> None:
                     flush=True,
                 )
                 disable_legacy_watcher()
-                print_access_details(bundle)
+                print_access_details(bundle, profile)
                 return
         except (
             OSError,
@@ -1723,17 +1788,20 @@ def install() -> None:
         if not existing_install_ready(bundle, attempts=6, delay=2):
             raise SystemExit("SSH güncellemesi sonrası root servisleri doğrulanamadı.")
         time.sleep(2)
-        if not login_panel_root(bundle.shell_password):
+        if profile == "full" and not login_panel_root(bundle.shell_password):
             raise SystemExit(
                 "SSH güncellemesi sonrası panel Root ve stok sayfaların "
                 "tamamı doğrulanamadı."
             )
-        print(
-            "[DOĞRULAMA] Panel Root, backend ve tüm stok Sistem Araçları hazır.",
-            flush=True,
-        )
+        if profile == "full":
+            print(
+                "[DOĞRULAMA] Panel Root, backend ve tüm stok Sistem Araçları hazır.",
+                flush=True,
+            )
+        else:
+            print("[DOĞRULAMA] Eski firmware çekirdek root servisleri hazır.", flush=True)
         disable_legacy_watcher()
-        print_access_details(bundle)
+        print_access_details(bundle, profile)
         return
 
     server, complete, snapshot = serve_bundle(bind, bundle)
@@ -1899,15 +1967,18 @@ def install() -> None:
         )
 
         time.sleep(2)
-        if not login_panel_root(bundle.shell_password):
+        if profile == "full" and not login_panel_root(bundle.shell_password):
             raise SystemExit(
                 "Panel Root, backend veya stok Sistem Araçlarının tamamı "
                 "doğrulanamadı."
             )
-        print(
-            "[DOĞRULAMA] Panel Root, backend ve tüm stok Sistem Araçları hazır.",
-            flush=True,
-        )
+        if profile == "full":
+            print(
+                "[DOĞRULAMA] Panel Root, backend ve tüm stok Sistem Araçları hazır.",
+                flush=True,
+            )
+        else:
+            print("[DOĞRULAMA] Eski firmware çekirdek root servisleri hazır.", flush=True)
 
         panel_state = port_state(80)
         tr069_state = port_state(8443)
@@ -1922,8 +1993,11 @@ def install() -> None:
         close_temporary_firewall(firewall_rule)
 
     disable_legacy_watcher()
-    print("TAMAMLANDI: UID 0 Telnet/SSH, kalıcı Root paneli ve TR-069 kilidi doğrulandı.")
-    print_access_details(bundle)
+    if profile == "full":
+        print("TAMAMLANDI: UID 0 Telnet/SSH, kalıcı Root paneli ve TR-069 kilidi doğrulandı.")
+    else:
+        print("TAMAMLANDI: Eski firmware'de kalıcı UID 0 Telnet/SSH, root API ve TR-069 kilidi doğrulandı.")
+    print_access_details(bundle, profile)
 
 
 def chrome_binary() -> str:
@@ -2653,6 +2727,7 @@ def dry_run() -> None:
         wait_for_panel_login()
 
     fp = enforce_supported_device()
+    profile = SUPPORTED_FIRMWARE_PROFILES[fp["softwareVersion"]]
 
     print(
         "[ÖN KONTROL] Aktarım sunucusu başlatılmadı ve Lifemote ayarı "
@@ -2663,6 +2738,7 @@ def dry_run() -> None:
         "[ÖN KONTROL] Kurulum bu aşamada başlayabilir.",
         flush=True,
     )
+    print(f"[ÖN KONTROL] Seçilen firmware profili: {profile}", flush=True)
     print(
         f"DRY_RUN_OK: {fp['model']} / "
         f"{fp['hardwareVersion']} / "
@@ -2675,7 +2751,7 @@ def oneclick() -> None:
     print("EX520v Tek Tuş Root Aracı", flush=True)
     print(
         f"Hedef: {SUPPORTED_MODEL} / tüm donanım revizyonları / "
-        f"{SUPPORTED_FIRMWARE}",
+        f"{', '.join(SUPPORTED_FIRMWARE_PROFILES)}",
         flush=True,
     )
 
